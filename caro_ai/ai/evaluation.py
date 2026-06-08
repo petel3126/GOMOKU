@@ -4,7 +4,7 @@ from .base_agent import BaseAgent
 PATTERNS = {
 
     # WIN
-    "XXXXX": 100000000,
+    "XXXXX": 1000000000,
 
     # OPEN FOUR
     "_XXXX_": 5000000,
@@ -19,11 +19,11 @@ PATTERNS = {
     "X_XXX": 800000,
 
     # OPEN THREE
-    "_XXX_": 700000,
+    "_XXX_": 200000,
 
     # BROKEN THREE
-    "_XX_X_": 15000,
-    "_X_XX_": 15000,
+    "_XX_X_": 200000,
+    "_X_XX_": 200000,
     "_X_X_X_": 7000,
 
     # OPEN TWO

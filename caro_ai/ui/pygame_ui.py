@@ -9,23 +9,20 @@ from caro_ai.ui.widgets import Button
 
 pygame.init()
 
-# =========================================================
-# CONFIG GIAO DIỆN
-# =========================================================
 WIDTH = 800
 HEIGHT = 800
 
-BOARD_ROWS = 15  
-BOARD_COLS = 15  
+BOARD_ROWS = 15
+BOARD_COLS = 15
 CELL_SIZE = 40
 
 BOARD_X = 100
 BOARD_Y = 100
 
 LINE_COLOR = (40, 40, 40)
-BG_COLOR = (245, 222, 179)    # Màu nền gỗ sáng khi chơi
-PLAYER_COLOR = (200, 50, 50)  # Đỏ cho Người chơi
-AI_COLOR = (50, 50, 200)      # Xanh cho AI
+BG_COLOR = (245, 222, 179)
+PLAYER_X_COLOR = (200, 50, 50)
+PLAYER_O_COLOR = (50, 50, 200)
 
 
 class CaroUI:
@@ -34,195 +31,272 @@ class CaroUI:
         pygame.display.set_caption("Caro AI - Minimax Alpha-Beta")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("arial", 35, bold=True)
-        
-        # Khởi tạo Menu Overlay từ file bạn gửi
+
         self.menu = MenuOverlay(WIDTH, HEIGHT)
-        self.mode = "MENU"  # Trạng thái ban đầu là MENU
-        
-        # Quản lý chế độ chơi
-        self.ai_first = False 
-        self.ai_sign = 'O'
-        self.human_sign = 'X'
-        
-        # Các nút bấm điều hướng khi kết thúc ván (Game Over)
-        self.restart_btn = Button(220, 730, 160, 45, "Play Again", bg_color=(34, 139, 34))
-        self.menu_btn = Button(420, 730, 160, 45, "Menu", bg_color=(128, 128, 128))
-        
+        self.mode = "MENU"
+
+        self.two_player_mode = False
+        self.ai_first = False
+        self.ai_sign = "O"
+        self.human_sign = "X"
+        self.ai = None
+
+        self.undo_btn = Button(120, 730, 160, 45, "Undo", bg_color=(184, 134, 11))
+        self.restart_btn = Button(320, 730, 160, 45, "Play Again", bg_color=(34, 139, 34))
+        self.menu_btn = Button(520, 730, 160, 45, "Menu", bg_color=(128, 128, 128))
+
+        self.state = GameState(
+            board=[[" " for _ in range(BOARD_COLS)] for _ in range(BOARD_ROWS)],
+            current_player="X",
+        )
         self.game_over = False
         self.winner = None
+        self.move_history = []
+        self.undo_available = False
 
     def reset_game(self):
-        """Khởi tạo lại ma trận bàn cờ dựa vào chế độ chơi được chọn từ Menu"""
         board = [[" " for _ in range(BOARD_COLS)] for _ in range(BOARD_ROWS)]
-        
-        # Quy ước: Nước đầu tiên của ván luôn luôn là quân 'X'
-        self.state = GameState(board=board, current_player='X') 
+        self.state = GameState(board=board, current_player="X")
         self.game_over = False
         self.winner = None
+        self.ai = None
+        self.move_history = []
+        self.undo_available = False
+
+        if self.two_player_mode:
+            self.ai_sign = "O"
+            self.human_sign = "X"
+            return
 
         if self.ai_first:
-            # AI DI TRC
-            self.ai_sign = 'X'
-            self.human_sign = 'O'
-            self.ai = AlphaBetaAgent(player='X', depth=4)
-            
-            # AI DI TRC -> tu dong cho nuoc dau tien o giua
+            self.ai_sign = "X"
+            self.human_sign = "O"
+            self.ai = AlphaBetaAgent(player="X", depth=4)
             self.ai_move()
         else:
-            # NG di truoc
-            self.ai_sign = 'O'
-            self.human_sign = 'X'
-            self.ai = AlphaBetaAgent(player='O', depth=4)
+            self.ai_sign = "O"
+            self.human_sign = "X"
+            self.ai = AlphaBetaAgent(player="O", depth=4)
+
+    def draw_piece(self, row, col, value):
+        cx = BOARD_X + col * CELL_SIZE + CELL_SIZE // 2
+        cy = BOARD_Y + row * CELL_SIZE + CELL_SIZE // 2
+        color = PLAYER_X_COLOR if value == "X" else PLAYER_O_COLOR
+
+        if value == "X":
+            s = 12
+            pygame.draw.line(self.screen, color, (cx - s, cy - s), (cx + s, cy + s), 4)
+            pygame.draw.line(self.screen, color, (cx + s, cy - s), (cx - s, cy + s), 4)
+        elif value == "O":
+            pygame.draw.circle(self.screen, color, (cx, cy), 15, 3)
+
+    def color_for_player(self, player):
+        return PLAYER_X_COLOR if player == "X" else PLAYER_O_COLOR
+
+    def draw_status(self):
+        if self.game_over:
+            if self.winner == "DRAW":
+                msg = "DRAW"
+                color = LINE_COLOR
+            elif self.two_player_mode:
+                msg = f"PLAYER {self.winner} WIN"
+                color = self.color_for_player(self.winner)
+            else:
+                msg = "AI WIN" if self.winner == "AI" else "YOU WIN"
+                winner_sign = self.ai_sign if self.winner == "AI" else self.human_sign
+                color = self.color_for_player(winner_sign)
+        elif self.two_player_mode:
+            msg = f"TURN: {self.state.current_player}"
+            color = self.color_for_player(self.state.current_player)
+        else:
+            msg = "YOUR TURN" if self.state.current_player == self.human_sign else "AI THINKING"
+            color = self.color_for_player(self.state.current_player)
+
+        text = self.font.render(msg, True, color)
+        rect = text.get_rect(center=(WIDTH // 2, 50))
+        self.screen.blit(text, rect)
 
     def draw_board(self):
-        """Vẽ toàn bộ bàn cờ và quân cờ"""
         self.screen.fill(BG_COLOR)
-        
-        # Vẽ lưới các ô vuông (15 ô cần 16 đường thẳng)
-        for row in range(BOARD_ROWS + 1):
-            pygame.draw.line(self.screen, LINE_COLOR, 
-                (BOARD_X, BOARD_Y + row * CELL_SIZE),
-                (BOARD_X + BOARD_COLS * CELL_SIZE, BOARD_Y + row * CELL_SIZE), 1)
-        for col in range(BOARD_COLS + 1):
-            pygame.draw.line(self.screen, LINE_COLOR,
-                (BOARD_X + col * CELL_SIZE, BOARD_Y),
-                (BOARD_X + col * CELL_SIZE, BOARD_Y + BOARD_ROWS * CELL_SIZE), 1)
 
-        # Vẽ các quân cờ động dựa theo quân thực tế đang nắm giữ
+        for row in range(BOARD_ROWS + 1):
+            pygame.draw.line(
+                self.screen,
+                LINE_COLOR,
+                (BOARD_X, BOARD_Y + row * CELL_SIZE),
+                (BOARD_X + BOARD_COLS * CELL_SIZE, BOARD_Y + row * CELL_SIZE),
+                1,
+            )
+
+        for col in range(BOARD_COLS + 1):
+            pygame.draw.line(
+                self.screen,
+                LINE_COLOR,
+                (BOARD_X + col * CELL_SIZE, BOARD_Y),
+                (BOARD_X + col * CELL_SIZE, BOARD_Y + BOARD_ROWS * CELL_SIZE),
+                1,
+            )
+
         for row in range(BOARD_ROWS):
             for col in range(BOARD_COLS):
-                value = self.state.board[row][col]
-                cx = BOARD_X + col * CELL_SIZE + CELL_SIZE // 2
-                cy = BOARD_Y + row * CELL_SIZE + CELL_SIZE // 2
+                self.draw_piece(row, col, self.state.board[row][col])
 
-                # Vẽ quân của NGƯỜI CHƠI (Màu đỏ)
-                if value == self.human_sign:
-                    if self.human_sign == 'X':
-                        s = 12
-                        pygame.draw.line(self.screen, PLAYER_COLOR, (cx-s, cy-s), (cx+s, cy+s), 4)
-                        pygame.draw.line(self.screen, PLAYER_COLOR, (cx+s, cy-s), (cx-s, cy+s), 4)
-                    else:
-                        pygame.draw.circle(self.screen, PLAYER_COLOR, (cx, cy), 15, 3)
+        self.draw_status()
 
-                # Vẽ quân của AI (Màu xanh)
-                elif value == self.ai_sign:
-                    if self.ai_sign == 'X':
-                        s = 12
-                        pygame.draw.line(self.screen, AI_COLOR, (cx-s, cy-s), (cx+s, cy+s), 4)
-                        pygame.draw.line(self.screen, AI_COLOR, (cx+s, cy-s), (cx-s, cy+s), 4)
-                    else:
-                        pygame.draw.circle(self.screen, AI_COLOR, (cx, cy), 15, 3)
+        if self.move_history and self.undo_available:
+            self.undo_btn.draw(self.screen)
 
-        # Hiện giao diện thông báo kết quả khi Game Over
         if self.game_over:
-            msg = "AI WIN" if self.winner == 'AI' else "YOU !"
-            color = AI_COLOR if self.winner == 'AI' else PLAYER_COLOR
-            text = self.font.render(msg, True, color)
-            rect = text.get_rect(center=(WIDTH // 2, 50))
-            self.screen.blit(text, rect)
-            
-            # Đổ dữ liệu 2 nút Chơi Lại / Menu lên màn hình
             self.restart_btn.draw(self.screen)
             self.menu_btn.draw(self.screen)
 
+    def is_board_full(self):
+        return all(" " not in row for row in self.state.board)
+
     def player_move(self, mouse_pos):
-        """Xử lý lượt đánh của con người"""
-        if self.game_over or self.state.current_player != self.human_sign:
+        if self.game_over:
+            return
+
+        if not self.two_player_mode and self.state.current_player != self.human_sign:
             return
 
         mx, my = mouse_pos
         col = (mx - BOARD_X) // CELL_SIZE
         row = (my - BOARD_Y) // CELL_SIZE
 
-        if 0 <= row < BOARD_ROWS and 0 <= col < BOARD_COLS:
-            if self.state.board[row][col] == " ":
-                self.state.board[row][col] = self.human_sign
-                
-                # Kiểm tra thắng cuộc cho Người
-                if check_win(self.state.board, row, col, self.human_sign):
-                    self.game_over = True
-                    self.winner = 'PLAYER'
-                else:
-                    # Đổi lượt sang cho AI
-                    self.state.current_player = self.ai_sign
-                    
-                    # Vẽ cập nhật ngay quân cờ vừa đánh trước khi AI bắt đầu chặn đứng mạch suy nghĩ
-                    self.draw_board()
-                    pygame.display.update()
-                    
-                    self.ai_move()
+        if not (0 <= row < BOARD_ROWS and 0 <= col < BOARD_COLS):
+            return
+
+        if self.state.board[row][col] != " ":
+            return
+
+        player = self.state.current_player if self.two_player_mode else self.human_sign
+        self.state.board[row][col] = player
+        self.move_history.append((row, col, player))
+        self.undo_available = True
+
+        if check_win(self.state.board, row, col, player):
+            self.game_over = True
+            self.winner = player if self.two_player_mode else "PLAYER"
+            return
+
+        if self.is_board_full():
+            self.game_over = True
+            self.winner = "DRAW"
+            return
+
+        if self.two_player_mode:
+            self.state.current_player = "O" if player == "X" else "X"
+            return
+
+        self.state.current_player = self.ai_sign
+        self.draw_board()
+        pygame.display.update()
+        self.ai_move()
 
     def ai_move(self):
-        """Kích hoạt AI tìm kiếm nước đi"""
-        if self.game_over: 
+        if self.game_over or self.ai is None:
             return
-        
+
         move = self.ai.choose_move(self.state)
-        if move:
-            r, c = move
-            self.state.board[r][c] = self.ai_sign
-            
-            # Kiểm tra thắng cuộc cho AI
-            if check_win(self.state.board, r, c, self.ai_sign):
-                self.game_over = True
-                self.winner = 'AI'
-            else:
-                # Trả lượt lại cho Con người
-                self.state.current_player = self.human_sign
+        if not move:
+            self.game_over = True
+            self.winner = "DRAW"
+            return
+
+        r, c = move
+        self.state.board[r][c] = self.ai_sign
+        self.move_history.append((r, c, self.ai_sign))
+
+        if check_win(self.state.board, r, c, self.ai_sign):
+            self.game_over = True
+            self.winner = "AI"
+            return
+
+        if self.is_board_full():
+            self.game_over = True
+            self.winner = "DRAW"
+            return
+
+        self.state.current_player = self.human_sign
+
+    def undo_move(self):
+        if not self.move_history or not self.undo_available:
+            return
+
+        if self.two_player_mode:
+            row, col, player = self.move_history.pop()
+            self.state.board[row][col] = " "
+            self.state.current_player = player
+        else:
+            if self.state.current_player == self.human_sign and self.move_history:
+                last_row, last_col, last_player = self.move_history[-1]
+                if last_player == self.ai_sign:
+                    self.move_history.pop()
+                    self.state.board[last_row][last_col] = " "
+
+            if self.move_history:
+                last_row, last_col, last_player = self.move_history[-1]
+                if last_player == self.human_sign:
+                    self.move_history.pop()
+                    self.state.board[last_row][last_col] = " "
+
+            self.state.current_player = self.human_sign
+
+        self.game_over = False
+        self.winner = None
+        self.undo_available = False
 
     def run(self):
-        """Vòng lặp chạy Game chính xử lý luồng nhận tín hiệu từ Menu của bạn"""
         while True:
             events = pygame.event.get()
             for event in events:
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
-                
-                # 1. PHÂN PHỐI SỰ KIỆN Ở TRẠNG THÁI MENU
+
                 if self.mode == "MENU":
                     action = self.menu.handle_event(event)
-                    
-                    # Đón nhận chuỗi "play_human" từ nút số 1 của bạn
+
                     if action == "play_human":
+                        self.two_player_mode = False
                         self.ai_first = False
                         self.reset_game()
                         self.mode = "PLAYING"
-                        
-                    # Đón nhận chuỗi "play_ai" từ nút số 2 của bạn
                     elif action == "play_ai":
+                        self.two_player_mode = False
                         self.ai_first = True
                         self.reset_game()
                         self.mode = "PLAYING"
-                        
-                    # Đón nhận chuỗi "quit" từ nút Thoát Game
+                    elif action == "play_two_players":
+                        self.two_player_mode = True
+                        self.ai_first = False
+                        self.reset_game()
+                        self.mode = "PLAYING"
                     elif action == "quit":
                         pygame.quit()
                         sys.exit()
-                
-                # 2. PHÂN PHỐI SỰ KIỆN Ở TRẠNG THÁI ĐANG CHƠI TRÊN BÀN CỜ
+
                 elif self.mode == "PLAYING":
                     if event.type == pygame.MOUSEBUTTONDOWN:
-                        if self.game_over:
-                            # Nếu kết thúc ván, kiểm tra tương tác nút điều hướng
+                        if self.undo_btn.is_clicked(event):
+                            self.undo_move()
+                        elif self.game_over:
                             if self.restart_btn.is_clicked(event):
                                 self.reset_game()
                             elif self.menu_btn.is_clicked(event):
                                 self.mode = "MENU"
                         else:
-                            # Nếu đang chơi, xử lý vị trí click cờ thông thường
                             self.player_move(event.pos)
-                    
+
                     if event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_m:  # Nhấn phím M nhanh để rút lui về Menu
+                        if event.key == pygame.K_m:
                             self.mode = "MENU"
 
-            # Render đồ họa dựa theo trạng thái màn hình hiện tại
             if self.mode == "MENU":
                 self.menu.draw(self.screen)
             else:
                 self.draw_board()
-            
+
             pygame.display.update()
             self.clock.tick(60)
-
